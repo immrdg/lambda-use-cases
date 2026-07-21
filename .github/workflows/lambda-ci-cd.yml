@@ -49,6 +49,7 @@ jobs:
         with:
           commit_message: "build(ci): update compiled lambda-function.zip artifact"
           file_pattern: "lambda/**/lambda-function.zip"
+          add_options: "-f"
 
   terragrunt-validate:
     name: Validate Terraform & Terragrunt HCL
