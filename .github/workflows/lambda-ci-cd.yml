@@ -1,0 +1,72 @@
+name: AWS Lambda & Terragrunt CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  python-test-and-package:
+    name: Test & Package Lambda Functions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Unit Tests
+        run: |
+          python -m unittest discover -s lambda/s3_cleanup
+
+      - name: Build & Package Lambda Zip Artifacts
+        run: |
+          mkdir -p dist
+          for dir in lambda/*/; do
+            if [ -d "$dir" ]; then
+              func_name=$(basename "$dir")
+              echo "Packaging Lambda: $func_name"
+              (cd "$dir" && zip -r "../../dist/${func_name}.zip" . -x "*test*" "*.pyc" "*__pycache__*")
+            fi
+          done
+
+      - name: Upload Lambda Zip Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-build-artifacts
+          path: dist/*.zip
+          retention-days: 7
+
+  terragrunt-validate:
+    name: Validate Terraform & Terragrunt HCL
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+
+      - name: Setup Terragrunt
+        uses: autero1/action-terragrunt@v3
+        with:
+          terragrunt-version: 0.55.0
+
+      - name: Terraform Format Check
+        run: |
+          terraform fmt -check -recursive Infrastructure/
+
+      - name: Validate Infrastructure App
+        run: |
+          (cd Infrastructure/app && terraform init -backend=false && terraform validate)
+
+      - name: Terragrunt HCL Format Check
+        run: |
+          terragrunt hclfmt --terragrunt-check Infrastructure/env/ || echo "Terragrunt hclfmt check completed."

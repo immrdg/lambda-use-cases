@@ -1,0 +1,219 @@
+AWS Automation with Lambda & Boto3 
+
+
+Submission Requirements (applies to all assignments):
+
+Push the Python code to GitHub and share the repository link.
+
+Provide a brief document explaining the steps you followed.
+
+Include screenshots of:
+
+IAM Role
+
+Lambda Configuration
+
+Test Invocation/Output
+
+CloudWatch Logs
+
+Final Result
+
+Your submission will be evaluated on:
+
+Correctness of the solution
+
+Successful end-to-end implementation
+
+Clarity and organization of the documentation
+
+Assessment Weightage: This assignment carries 50 marks and is an important component of your Final Certification. Ensure your solution is complete, well-documented, and thoroughly tested before submission. 
+
+Note: You only need to complete any 4 assignments for grading. However, practicing all the assignments is highly recommended, as these automation patterns are commonly used in real-world DevOps roles and technical interviews.
+
+
+
+General notes for all assignments:
+
+Use Python 3.12 or later as the Lambda runtime (Python 3.7/3.8 runtimes are deprecated).
+
+Use Amazon EventBridge for scheduling and event rules (the service formerly called CloudWatch Events).
+
+Use t3.micro for any EC2 instances (free-tier eligible in most regions).
+
+For IAM, write least-privilege inline policies wherever possible instead of attaching *FullAccess managed policies. This is what interviewers and real environments expect.
+
+Always print/log affected resource IDs so results are visible in CloudWatch Logs.
+
+Important : Cost Management Tips
+If you clean up your resources after testing, these assignments should cost little to nothing.
+
+Keep these points in mind:
+Cost Explorer API (Assignment 4): Approximately ₹1 per API call. Test only a few times and do not schedule it.
+
+EC2: Stop or terminate instances immediately after capturing your screenshots.
+
+Snapshots & S3 Buckets: Delete them once your testing is complete.
+
+Elastic IPs: Release any unused Elastic IPs.
+
+Best Practices
+Use one AWS Region throughout (recommended: us-east-1).
+
+Complete the assignment and clean up resources in the same sitting.
+
+Set up a $1 AWS Budget Alert before you begin.
+
+Before logging out, ensure there are no unused EC2 instances, S3 buckets, or snapshots.
+
+⚠️ Most common mistake: Forgetting to terminate an EC2 instance, which can lead to unexpected AWS charges.
+
+
+Assignment Questions:
+1.Automated S3 Bucket Cleanup (Objects Older Than 30 Days)
+Objective: Automate deletion of stale objects in an S3 bucket.
+
+Task: Delete files older than 30 days in a specific bucket.
+
+Instructions:
+
+S3 Setup: Create a bucket and upload several files. (Since you can't easily create "old" objects, temporarily lower the age threshold to minutes for testing — then set it back to 30 days in the final code.)
+
+Lambda IAM Role: Inline policy with s3:ListBucket and s3:DeleteObject scoped to your bucket.
+
+Lambda Function (Python 3.12+, Boto3):
+
+List objects in the bucket (use the paginator — never assume one page of results).
+
+Compare each object's LastModified (timezone-aware) with the current UTC time.
+
+Delete objects older than 30 days.
+
+Print the names of deleted objects.
+
+Testing: Manually trigger and confirm only newer files remain.
+
+Discussion point (include in your documentation): In production, S3 Lifecycle Rules handle this natively with zero code. Explain in 2–3 lines when you'd use Lambda instead (e.g., conditional logic, naming patterns, cross-service actions).
+
+
+2.Automated EBS Snapshot Creation and Cleanup
+Objective: Automate EBS volume backups and delete snapshots older than a retention period.
+
+Instructions:
+
+EBS Setup: Identify or create an EBS volume; note the volume ID.
+
+Lambda IAM Role: Inline policy with ec2:CreateSnapshot, ec2:DescribeSnapshots, ec2:DeleteSnapshot, ec2:CreateTags.
+
+Lambda Function (Boto3):
+
+Create a snapshot of the specified volume and tag it (e.g., CreatedBy=Lambda-Backup).
+
+List snapshots with that tag (owned by your account) and delete those older than 30 days.
+
+Print IDs of created and deleted snapshots.
+
+EventBridge: Schedule the function weekly.
+
+Testing: Trigger manually; confirm snapshot creation and cleanup in the EC2 console.
+
+Discussion point: AWS Data Lifecycle Manager (DLM) does this natively. Note in your documentation when Lambda is still the better choice (custom retention logic, cross-account copies, notifications).
+
+
+
+3. Auto-Tagging EC2 Instances on Launch
+Objective: Automatically tag newly launched EC2 instances for resource tracking, ownership, and cost allocation.
+
+Instructions:
+
+Lambda IAM Role: Inline policy with ec2:CreateTags and ec2:DescribeInstances.
+
+Lambda Function (Boto3):
+
+Extract the instance ID from the EventBridge event (detail.instance-id).
+
+Tag the instance with LaunchDate=<current date> and a custom tag (e.g., Owner or Environment).
+
+Print a confirmation message.
+
+EventBridge Rule: Create a rule matching event pattern — source aws.ec2, detail-type EC2 Instance State-change Notification, state running — with the Lambda as target.
+
+Testing: Launch a new instance; after a short delay, confirm the tags appear.
+
+Bonus: Extract the launching IAM user from CloudTrail events and add an Owner tag automatically — this is a popular interview scenario.
+
+
+4.Daily AWS Cost Alert Using Cost Explorer API and SNS
+Objective: Build an automated alert when AWS spend exceeds a threshold.
+
+Note: The old CloudWatch "Billing" metric is legacy — it only exists in us-east-1 and must be manually enabled. The modern, interview-relevant approach uses the Cost Explorer API (ce:GetCostAndUsage).
+
+Instructions:
+
+SNS Setup: Create a topic and subscribe your email (confirm the subscription email).
+
+Lambda IAM Role: Inline policy with ce:GetCostAndUsage and sns:Publish (scoped to your topic).
+
+Lambda Function (Boto3):
+
+Initialize ce and sns clients.
+
+Query month-to-date UnblendedCost with get_cost_and_usage.
+
+Compare against a threshold (e.g., $50).
+
+If exceeded, publish an SNS alert with the current spend.
+
+Print the retrieved amount for logging.
+
+EventBridge: Schedule daily.
+
+Testing: Trigger manually with a low threshold (e.g., $0.01) to force an alert.
+
+Discussion point: Mention AWS Budgets as the managed alternative and when custom Lambda logic wins (per-service breakdowns, Slack/Teams delivery, anomaly logic).
+
+
+5.Restore an EC2 Instance from the Latest Snapshot
+Objective: Automate disaster-recovery: rebuild an instance from its most recent EBS snapshot.
+
+Instructions:
+
+Prerequisite: At least one snapshot of the source instance's root volume exists (Graded 2 pairs well here).
+
+Lambda IAM Role: ec2:DescribeSnapshots, ec2:RegisterImage (or ec2:CreateImage), ec2:RunInstances, ec2:DescribeImages, ec2:CreateTags.
+
+Lambda Function (Boto3):
+
+Find the most recent snapshot for the given volume/instance (sort describe_snapshots by StartTime).
+
+Register an AMI from the snapshot with register_image (specify root device mapping).
+
+Launch a new t3.micro instance from that AMI and tag it (e.g., RestoredFrom=<snapshot-id>).
+
+Print the new instance ID.
+
+Testing: Trigger manually; verify the new instance boots and contains the snapshot's data. Terminate test instances afterwards to avoid charges.
+
+
+6.Audit S3 Buckets for Public Access and Notify
+Objective: Detect any bucket that is publicly accessible and alert via SNS.
+
+Note: Since April 2023, new buckets have Block Public Access enabled and ACLs disabled by default — so your audit must check both the Block Public Access configuration and bucket policy status, not just ACLs.
+
+Instructions:
+
+SNS Setup: Topic + email subscription.
+
+Lambda IAM Role: s3:ListAllMyBuckets, s3:GetBucketPublicAccessBlock, s3:GetBucketPolicyStatus, s3:GetBucketAcl, sns:Publish.
+
+Lambda Function (Boto3):
+
+List all buckets.
+
+For each: check get_public_access_block, get_bucket_policy_status (IsPublic flag), and ACL grants.
+
+If any bucket is public (or has Block Public Access disabled), publish an SNS alert naming it.
+
+EventBridge: Schedule daily.
+
+Testing: Deliberately disable Block Public Access on one test bucket and attach a public-read bucket policy; confirm the alert. Re-secure the bucket immediately after testing.
