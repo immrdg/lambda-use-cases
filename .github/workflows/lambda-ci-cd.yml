@@ -47,7 +47,7 @@ jobs:
       - name: Commit and Push Zip to Branch
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "build(ci): update compiled lambda-function.zip artifact"
+          commit_message: "build(ci): update compiled lambda-function.zip artifact [skip ci]"
           file_pattern: "lambda/**/lambda-function.zip"
           add_options: "-f"
 
