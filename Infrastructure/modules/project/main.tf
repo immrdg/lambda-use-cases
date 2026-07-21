@@ -13,7 +13,7 @@ locals {
 module "lambda" {
   source        = "../lambda"
   function_name = "s3-cleanup-${var.environment}"
-  source_dir    = "${path.module}/../../../lambda/s3-cleanup"
+  zip_file_path = "${path.module}/../../../lambda/s3-cleanup/lambda-function.zip"
   handler       = "handler.lambda_handler"
   runtime       = "python3.12"
   timeout       = var.lambda_timeout

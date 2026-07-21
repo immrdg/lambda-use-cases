@@ -2,18 +2,23 @@ name: AWS Lambda & Terragrunt CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, "feat/**", "infra/**" ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   python-test-and-package:
-    name: Test & Package Lambda Functions
+    name: Test, Package & Push Lambda Zip to Branch
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -29,20 +34,26 @@ jobs:
             fi
           done
 
-      - name: Build & Package Lambda Zip
+      - name: Build & Package Lambda Zip inside directory
         run: |
-          mkdir -p dist
           for dir in lambda/*/; do
             if [ -d "$dir" ]; then
               func_name=$(basename "$dir")
-              echo "Packaging Lambda: $func_name"
-              (cd "$dir" && zip -r "../../dist/${func_name}.zip" . -x "*test*" "*.pyc" "*__pycache__*")
+              echo "Packaging Lambda: $func_name into $dir/lambda-function.zip"
+              (cd "$dir" && zip -r "lambda-function.zip" . -x "*test*" "*.pyc" "*__pycache__*" "*.zip")
             fi
           done
+
+      - name: Commit and Push Zip to Branch
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "build(ci): update compiled lambda-function.zip artifact"
+          file_pattern: "lambda/**/lambda-function.zip"
 
   terragrunt-validate:
     name: Validate Terraform & Terragrunt HCL
     runs-on: ubuntu-latest
+    needs: python-test-and-package
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4

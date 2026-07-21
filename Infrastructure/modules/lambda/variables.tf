@@ -3,15 +3,22 @@ variable "function_name" {
   type        = string
 }
 
-variable "source_dir" {
-  description = "Source code directory to package into zip"
+variable "zip_file_path" {
+  description = "Path to compiled zip file"
   type        = string
+  default     = null
+}
+
+variable "source_dir" {
+  description = "Source code directory to package into zip if zip_file_path is null"
+  type        = string
+  default     = null
 }
 
 variable "handler" {
   description = "Function entrypoint handler"
   type        = string
-  default     = "index.lambda_handler"
+  default     = "handler.lambda_handler"
 }
 
 variable "runtime" {

@@ -1,4 +1,9 @@
+locals {
+  zip_path = var.zip_file_path != null ? var.zip_file_path : (length(data.archive_file.lambda_zip) > 0 ? data.archive_file.lambda_zip[0].output_path : "")
+}
+
 data "archive_file" "lambda_zip" {
+  count       = var.zip_file_path == null ? 1 : 0
   type        = "zip"
   source_dir  = var.source_dir
   output_path = "${path.module}/../../../build/${var.function_name}.zip"
@@ -55,14 +60,14 @@ resource "aws_cloudwatch_log_group" "lambda_log_group" {
 }
 
 resource "aws_lambda_function" "this" {
-  filename         = data.archive_file.lambda_zip.output_path
+  filename         = local.zip_path
+  source_code_hash = filebase64sha256(local.zip_path)
   function_name    = var.function_name
   role             = aws_iam_role.lambda_role.arn
   handler          = var.handler
   runtime          = var.runtime
   timeout          = var.timeout
   memory_size      = var.memory_size
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 
   environment {
     variables = var.environment_variables
