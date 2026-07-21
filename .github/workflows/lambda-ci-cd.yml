@@ -34,13 +34,13 @@ jobs:
             fi
           done
 
-      - name: Build & Package Lambda Zip inside directory
+      - name: Build & Package Lambda Zip (Deterministic)
         run: |
           for dir in lambda/*/; do
             if [ -d "$dir" ]; then
               func_name=$(basename "$dir")
-              echo "Packaging Lambda: $func_name into $dir/lambda-function.zip"
-              (cd "$dir" && zip -r "lambda-function.zip" . -x "*test*" "*.pyc" "*__pycache__*" "*.zip")
+              echo "Packaging Lambda: $func_name deterministically"
+              (cd "$dir" && find . -type f -not -name "*.zip" -exec touch -t 202601010000.00 {} + && zip -X -r -D "lambda-function.zip" . -x "*test*" "*.pyc" "*__pycache__*" "*.zip")
             fi
           done
 
