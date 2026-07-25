@@ -66,5 +66,4 @@ class TestS3CleanupLambda(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    # Added Comment
     unittest.main()
