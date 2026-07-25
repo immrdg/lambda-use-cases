@@ -23,3 +23,16 @@ output "ebs_snapshot_function_name" {
 output "ebs_snapshot_function_arn" {
   value = module.ebs_snapshot_lambda.function_arn
 }
+
+# ── Assignment 3 ──────────────────────────────────────────────────────────────
+output "auto_tagging_ec2_function_name" {
+  value = module.auto_tagging_ec2_lambda.function_name
+}
+
+output "auto_tagging_ec2_function_arn" {
+  value = module.auto_tagging_ec2_lambda.function_arn
+}
+
+output "auto_tagging_ec2_rule_name" {
+  value = module.auto_tagging_ec2_rule.rule_name
+}
