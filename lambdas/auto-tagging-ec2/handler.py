@@ -9,124 +9,94 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-def get_launcher_iam_user(cloudtrail_client, instance_id, default_owner="DevOpsTeam"):
+def get_owner_tag(cloudtrail_client, instance_id, default_owner="DevOpsTeam"):
     """
-    Queries CloudTrail events to identify the IAM user or entity that launched the EC2 instance.
-    Falls back to default_owner if CloudTrail lookup produces no match or fails.
+    Queries CloudTrail for the RunInstances event to extract the launching IAM user/role.
+    Handles SSO / AssumedRole names (e.g. AROA...:Gireesh -> Gireesh).
     """
     if not cloudtrail_client:
         return default_owner
 
     try:
-        # Lookup CloudTrail events associated with the instance ID
         response = cloudtrail_client.lookup_events(
-            LookupAttributes=[
-                {"AttributeKey": "ResourceName", "AttributeValue": instance_id}
-            ],
-            MaxResults=10,
+            LookupAttributes=[{"AttributeKey": "ResourceName", "AttributeValue": instance_id}],
+            MaxResults=5,
         )
-
+        logger.info(f"CloudTrail response: {json.dumps(response)}")
         for event in response.get("Events", []):
             if event.get("EventName") == "RunInstances":
-                if event.get("Username"):
-                    logger.info(f"Found IAM username from CloudTrail event: {event['Username']}")
-                    return event["Username"]
+                username = event.get("Username")
 
-                # Fallback to parsing raw CloudTrailEvent JSON payload
-                cloudtrail_payload = event.get("CloudTrailEvent")
-                if cloudtrail_payload:
+                # Fallback to CloudTrailEvent payload if Username top-level field is empty
+                if not username and event.get("CloudTrailEvent"):
                     try:
-                        ct_json = json.loads(cloudtrail_payload)
-                        user_identity = ct_json.get("userIdentity", {})
-                        user_name = (
-                            user_identity.get("userName")
-                            or user_identity.get("principalId")
-                            or user_identity.get("arn")
-                        )
-                        if user_name:
-                            logger.info(f"Parsed username '{user_name}' from CloudTrail JSON")
-                            return user_name
+                        ct_json = json.loads(event["CloudTrailEvent"])
+                        user_id = ct_json.get("userIdentity", {})
+                        username = user_id.get("userName") or user_id.get("principalId") or user_id.get("arn")
                     except json.JSONDecodeError:
                         pass
 
-    except ClientError as e:
-        logger.warning(f"Could not query CloudTrail for instance {instance_id}: {e}")
-    except Exception as e:
-        logger.warning(f"Unexpected error during CloudTrail lookup: {e}")
+                if username:
+                    # Parse clean username from SSO / AssumedRole format (e.g. AROA...:Gireesh -> Gireesh)
+                    clean_user = username.split(":")[-1].split("/")[-1]
+                    logger.info(f"Extracted owner '{clean_user}' from CloudTrail")
+                    return clean_user
 
-    logger.info(f"Defaulting Owner tag to '{default_owner}' for instance {instance_id}")
+    except Exception as e:
+        logger.warning(f"CloudTrail lookup failed: {e}")
+
     return default_owner
 
 
 def lambda_handler(event, context):
     """
-    Lambda function triggered by EventBridge on EC2 Instance State-change Notification (running state).
-    Automatically tags the newly launched instance with LaunchDate, Owner, and Environment.
+    Lambda function triggered by EventBridge when an EC2 instance enters 'running' state.
+    Tags instance with LaunchDate=<current date>, Owner=<IAM User>, Environment=<env>.
     """
     logger.info(f"Received EventBridge event: {json.dumps(event)}")
 
-    # Extract instance-id from various possible event structures
+    # Extract instance ID from EventBridge event payload
     detail = event.get("detail", {})
-    instance_id = (
-        detail.get("instance-id")
-        or event.get("instance_id")
-        or event.get("instance-id")
-    )
-
-    # Secondary check for CloudTrail RunInstances event structure
-    if not instance_id and "responseElements" in detail:
-        try:
-            instances = detail["responseElements"]["instancesSet"]["items"]
-            if instances:
-                instance_id = instances[0].get("instanceId")
-        except (KeyError, IndexError, TypeError):
-            pass
+    instance_id = detail.get("instance-id") or event.get("instance_id")
 
     if not instance_id:
-        msg = "Error: Could not extract instance-id from EventBridge event payload."
+        msg = "Error: Could not extract instance-id from event payload."
         logger.error(msg)
         return {"statusCode": 400, "body": msg}
 
     default_owner = os.environ.get("DEFAULT_OWNER", "DevOpsTeam")
-    environment_name = os.environ.get("ENVIRONMENT", "dev")
-    current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    env_name = os.environ.get("ENVIRONMENT", "dev")
+    launch_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    ec2_client = boto3.client("ec2")
-
+    # Bonus: Extract launching IAM user from CloudTrail
     try:
-        cloudtrail_client = boto3.client("cloudtrail")
+        ct_client = boto3.client("cloudtrail")
+        owner = get_owner_tag(ct_client, instance_id, default_owner)
     except Exception:
-        cloudtrail_client = None
-
-    # Determine Owner tag (Bonus CloudTrail lookup)
-    owner = get_launcher_iam_user(cloudtrail_client, instance_id, default_owner=default_owner)
+        owner = default_owner
 
     tags = [
-        {"Key": "LaunchDate", "Value": current_date},
+        {"Key": "LaunchDate", "Value": launch_date},
         {"Key": "Owner", "Value": owner},
-        {"Key": "Environment", "Value": environment_name},
-        {"Key": "AutoTaggedBy", "Value": "Lambda-AutoTagging"},
+        {"Key": "Environment", "Value": env_name},
     ]
 
+    ec2 = boto3.client("ec2")
     try:
-        ec2_client.create_tags(Resources=[instance_id], Tags=tags)
-        confirmation_msg = (
-            f"Successfully auto-tagged EC2 instance {instance_id} "
-            f"with LaunchDate={current_date}, Owner={owner}, Environment={environment_name}."
-        )
-        logger.info(confirmation_msg)
-        print(confirmation_msg)
+        ec2.create_tags(Resources=[instance_id], Tags=tags)
+        confirmation = f"Successfully tagged EC2 instance {instance_id}: LaunchDate={launch_date}, Owner={owner}, Environment={env_name}"
+        logger.info(confirmation)
+        print(confirmation)
 
         return {
             "statusCode": 200,
             "body": {
-                "message": confirmation_msg,
+                "message": confirmation,
                 "instance_id": instance_id,
                 "tags": {t["Key"]: t["Value"] for t in tags},
             },
         }
 
     except ClientError as e:
-        error_msg = f"Failed to tag EC2 instance {instance_id}: {e}"
-        logger.error(error_msg)
+        logger.error(f"Failed to tag instance {instance_id}: {e}")
         raise e
