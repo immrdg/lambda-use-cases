@@ -26,8 +26,6 @@ lambda-use-cases/
 │       ├── test_handler.py
 │       ├── requirements.txt
 │       └── lambda-function.zip   # Built by CI, consumed by Terraform
-├── scripts/
-│   └── live_test.sh              # End-to-end demo script
 ├── Makefile
 └── terragrunt.hcl
 ```
@@ -119,20 +117,36 @@ aws lambda invoke \
   response.json && cat response.json
 ```
 
-### End-to-End Demo
+### End-to-End Demo (Testing with a short retention window)
+
+To verify deletions without waiting 30 days, temporarily lower `RETENTION_DAYS` to a fraction of a day:
 
 ```bash
-chmod +x scripts/live_test.sh
-./scripts/live_test.sh
-```
+# Set retention to ~3 minutes
+aws lambda update-function-configuration \
+  --function-name s3-cleanup-dev \
+  --profile immrdg21 --region us-east-1 \
+  --environment "Variables={BUCKET_NAME=s3-cleanup-bucket-dev-use-case-1,RETENTION_DAYS=0.002}"
 
-The script:
-1. Uploads 5 test files to the bucket
-2. Sets `RETENTION_DAYS=0.002` (~3 min threshold)
-3. Sets EventBridge to `rate(2 minutes)`
-4. Tails CloudWatch logs for 4 minutes
-5. Shows final (empty) bucket state
-6. Restores original config on exit
+# Upload test files
+for i in $(seq 1 5); do
+  echo "test $i" | aws s3 cp - s3://s3-cleanup-bucket-dev-use-case-1/test-file-$i.txt \
+    --profile immrdg21 --region us-east-1
+done
+
+# Wait 3+ minutes, then invoke
+aws lambda invoke \
+  --function-name s3-cleanup-dev \
+  --profile immrdg21 --region us-east-1 \
+  --payload '{}' --cli-binary-format raw-in-base64-out \
+  response.json && cat response.json
+
+# Restore to 30 days after testing
+aws lambda update-function-configuration \
+  --function-name s3-cleanup-dev \
+  --profile immrdg21 --region us-east-1 \
+  --environment "Variables={BUCKET_NAME=s3-cleanup-bucket-dev-use-case-1,RETENTION_DAYS=30}"
+```
 
 ### Screenshots
 
@@ -160,8 +174,4 @@ The script:
 
 ### Discussion: S3 Lifecycle Rules vs Lambda
 
-S3 Lifecycle Rules handle basic age-based expiration natively with zero code. Use Lambda when you need:
-
-1. **Conditional logic** — filter by metadata tags, naming patterns, or file size before deleting
-2. **Cross-service actions** — check DynamoDB before deletion, trigger SQS/SNS after
-3. **Custom notifications** — send Slack/email alerts with a list of deleted keys per run
+S3 Lifecycle Rules handle age-based object expiration natively with zero code and are the right default for simple time-based cleanup. Lambda is the better choice when deletion requires **conditional logic** (e.g. only delete objects matching a naming pattern or a specific metadata tag), **cross-service coordination** (e.g. verify an object is processed in DynamoDB before removing it), or **custom post-deletion actions** such as sending a detailed Slack/SNS alert with the list of deleted keys.
