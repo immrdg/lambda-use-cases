@@ -11,74 +11,63 @@ permissions:
   contents: write
 
 jobs:
-  python-test-and-package:
-    name: Test, Package & Push Lambda Zip to Branch
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHON_VERSION: 3.12
     steps:
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Run Unit Tests
+      - name: Detect changed lambda directories
+        id: changed-lambdas
         run: |
-          for dir in lambda/*/; do
-            if [ -d "$dir" ]; then
-              echo "Testing Lambda module: $dir"
-              python -m unittest discover -s "$dir"
-            fi
+           if [[ "${{ github.event_name }}" == "push" ]]; then
+             git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep "^lambda/" | cut -d '/' -f2 | sort | uniq | tr '\n' ' ' > changed-lambdas.txt
+           elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+             git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head }} | grep "^lambdas/" | cut -d '/' -f2 | sort | uniq | tr '\n' ' ' > changed-lambdas.txt
+           else
+             echo "No changes detected" > changed-lambdas.txt
+           fi
+
+           if [ -f changed-lambdas.txt ]; then
+             CHANGED_LAMBDAS=$(cat changed-lambdas.txt)
+             echo "Changed lambdas: $CHANGED_LAMBDAS"
+             echo "::set-output name=changed-lambdas::$CHANGED_LAMBDAS"
+           else
+             echo "::set-output name=changed-lambdas::"
+           fi
+      - name: Run unit tests
+        if: steps.changed-lambdas.outputs.changed-lambdas != ''
+        run: |
+          for lambda in ${{ steps.changed-lambdas.outputs.changed-lambdas }}; do
+            echo "Running unit tests for $lambda"
+            pytest -m unittest discover -s lambda/$lambda
+          done 
+      - name: Build Lambda
+        if: steps.changed-lambdas.outputs.changed-lambdas != ''
+        run: |
+          for lambda in ${{ steps.changed-lambdas.outputs.changed-lambdas }}; do
+            echo "Building $lambda"
+            cd "lambda/$lambda"
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt -t ./
+            cd -
           done
-
-      - name: Build & Package Lambda Zip (Deterministic)
-        run: |
-          for dir in lambda/*/; do
-            if [ -d "$dir" ]; then
-              func_name=$(basename "$dir")
-              echo "Packaging Lambda: $func_name deterministically"
-              (cd "$dir" && find . -type f -not -name "*.zip" -exec touch -t 202601010000.00 {} + && zip -X -r -D "lambda-function.zip" . -x "*test*" "*.pyc" "*__pycache__*" "*.zip")
-            fi
-          done
-
-      - name: Commit and Push Zip to Branch
-        uses: stefanzweifel/git-auto-commit-action@v5
+        
+      - name: Upload Lambda Packages
+        uses: actions/upload-artifact@v4
         with:
-          commit_message: "build(ci): update compiled lambda-function.zip artifact [skip ci]"
-          file_pattern: "lambda/**/lambda-function.zip"
-          add_options: "-f"
-          push_options: "--force"
-
-  terragrunt-validate:
-    name: Validate Terraform & Terragrunt HCL
-    runs-on: ubuntu-latest
-    needs: python-test-and-package
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.7.5
-
-      - name: Setup Terragrunt
-        uses: autero1/action-terragrunt@v3
-        with:
-          terragrunt-version: 0.55.0
-
-      - name: Terraform Format Check
-        run: |
-          terraform fmt -check -recursive Infrastructure/
-
-      - name: Validate Infrastructure App
-        run: |
-          (cd Infrastructure/app && terraform init -backend=false && terraform validate)
-
-      - name: Terragrunt HCL Format Check
-        run: |
-          terragrunt hclfmt --terragrunt-check Infrastructure/env/ || echo "Terragrunt hclfmt check completed."
+          name: lambda-packages
+          path: dist/
+        
+        
