@@ -19,15 +19,26 @@ jobs:
           ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies & run unit tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest boto3
+          make test
+
       - name: Detect changed lambda directories
         id: changed-lambdas
         run: |
-          BEFORE="${{ github.event.before }}"
-          AFTER="${{ github.event.after }}"
-          # On PR 'opened', before is all-zeros — fall back to merge-base diff
-          if [[ "$BEFORE" == "0000000000000000000000000000000000000000" ]]; then
-            BEFORE=$(git merge-base \
-              "${{ github.event.pull_request.base.sha }}" "$AFTER")
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            BEFORE="${{ github.event.pull_request.base.sha }}"
+            AFTER="${{ github.event.pull_request.head.sha }}"
+          else
+            BEFORE="${{ github.event.before }}"
+            AFTER="${{ github.sha }}"
           fi
           CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" \
             | grep "^lambdas/" | cut -d '/' -f2 | sort -u | tr '\n' ' ' | xargs)
