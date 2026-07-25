@@ -17,7 +17,8 @@ provider.tf
 # Build & Zip Artifacts
 build/
 dist/
-*.zip
+build/**/*.zip
+dist/**/*.zip
 
 # Python
 __pycache__/

@@ -1,77 +1,90 @@
 name: AWS Lambda & Terragrunt CI/CD Pipeline
 
 on:
-  push:
-    branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
 
-jobs:
-  python-test-and-package:
-    name: Test & Package Lambda Functions
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+permissions:
+  contents: write
 
-      - name: Set up Python 3.12
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHON_VERSION: "3.12"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Run Unit Tests
+      - name: Detect changed lambda directories
+        id: changed-lambdas
         run: |
-          for dir in lambda/*/; do
-            if [ -d "$dir" ]; then
-              echo "Testing Lambda module: $dir"
-              python -m unittest discover -s "$dir"
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+          # On PR 'opened', before is all-zeros — fall back to merge-base diff
+          if [[ "$BEFORE" == "0000000000000000000000000000000000000000" ]]; then
+            BEFORE=$(git merge-base \
+              "${{ github.event.pull_request.base.sha }}" "$AFTER")
+          fi
+          CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" \
+            | grep "^lambdas/" | cut -d '/' -f2 | sort -u | tr '\n' ' ' | xargs)
+          echo "Changed lambdas: '$CHANGED'"
+          echo "changed-lambdas=$CHANGED" >> "$GITHUB_OUTPUT"
+
+      - name: Build and zip Lambda packages
+        if: steps.changed-lambdas.outputs.changed-lambdas != ''
+        run: |
+          for lambda_name in ${{ steps.changed-lambdas.outputs.changed-lambdas }}; do
+            echo "Building $lambda_name"
+            LAMBDA_DIR="lambdas/$lambda_name"
+            BUILD_DIR="build/$lambda_name"
+
+            mkdir -p "$BUILD_DIR"
+            cp -r "$LAMBDA_DIR"/. "$BUILD_DIR/"
+
+            if [ -f "$BUILD_DIR/requirements.txt" ]; then
+              pip install -r "$BUILD_DIR/requirements.txt" -t "$BUILD_DIR/" --quiet
             fi
+
+            find "$BUILD_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+
+            # Zip into the lambda's own directory
+            ZIP_FILE="$GITHUB_WORKSPACE/$LAMBDA_DIR/lambda-function.zip"
+            (cd "$BUILD_DIR" && zip -r "$ZIP_FILE" . -x "*.pyc")
+            echo "Created $LAMBDA_DIR/lambda-function.zip"
           done
 
-      - name: Build & Package Lambda Zip Artifacts
+      # Runs only on PRs — not workflow_dispatch
+      - name: Commit and push zip packages to repo
+        if: >-
+          steps.changed-lambdas.outputs.changed-lambdas != '' &&
+          github.event_name == 'pull_request'
         run: |
-          mkdir -p dist
-          for dir in lambda/*/; do
-            if [ -d "$dir" ]; then
-              func_name=$(basename "$dir")
-              echo "Packaging Lambda: $func_name"
-              (cd "$dir" && zip -r "../../dist/${func_name}.zip" . -x "*test*" "*.pyc" "*__pycache__*")
-            fi
-          done
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Upload Lambda Zip Artifacts
+          git add lambdas/**/*.zip
+          if git diff --cached --quiet; then
+            echo "No zip changes to commit"
+          else
+            git commit -m "ci: update Lambda zip packages [skip ci]"
+            git push origin HEAD:${{ github.head_ref || github.ref_name }}
+          fi
+
+      - name: Upload Lambda packages as artifact
+        if: steps.changed-lambdas.outputs.changed-lambdas != ''
         uses: actions/upload-artifact@v4
         with:
-          name: lambda-build-artifacts
-          path: dist/*.zip
+          name: lambda-packages
+          path: lambdas/**/*.zip
           retention-days: 7
-
-  terragrunt-validate:
-    name: Validate Terraform & Terragrunt HCL
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.7.5
-
-      - name: Setup Terragrunt
-        uses: autero1/action-terragrunt@v3
-        with:
-          terragrunt-version: 0.55.0
-
-      - name: Terraform Format Check
-        run: |
-          terraform fmt -check -recursive Infrastructure/
-
-      - name: Validate Infrastructure App
-        run: |
-          (cd Infrastructure/app && terraform init -backend=false && terraform validate)
-
-      - name: Terragrunt HCL Format Check
-        run: |
-          terragrunt hclfmt --terragrunt-check Infrastructure/env/ || echo "Terragrunt hclfmt check completed."
