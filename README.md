@@ -117,61 +117,8 @@ aws lambda invoke \
   response.json && cat response.json
 ```
 
-### End-to-End Demo (Testing with a short retention window)
+### Discussions: 
 
-To verify deletions without waiting 30 days, temporarily lower `RETENTION_DAYS` to a fraction of a day:
-
-```bash
-# Set retention to ~3 minutes
-aws lambda update-function-configuration \
-  --function-name s3-cleanup-dev \
-  --profile immrdg21 --region us-east-1 \
-  --environment "Variables={BUCKET_NAME=s3-cleanup-bucket-dev-use-case-1,RETENTION_DAYS=0.002}"
-
-# Upload test files
-for i in $(seq 1 5); do
-  echo "test $i" | aws s3 cp - s3://s3-cleanup-bucket-dev-use-case-1/test-file-$i.txt \
-    --profile immrdg21 --region us-east-1
-done
-
-# Wait 3+ minutes, then invoke
-aws lambda invoke \
-  --function-name s3-cleanup-dev \
-  --profile immrdg21 --region us-east-1 \
-  --payload '{}' --cli-binary-format raw-in-base64-out \
-  response.json && cat response.json
-
-# Restore to 30 days after testing
-aws lambda update-function-configuration \
-  --function-name s3-cleanup-dev \
-  --profile immrdg21 --region us-east-1 \
-  --environment "Variables={BUCKET_NAME=s3-cleanup-bucket-dev-use-case-1,RETENTION_DAYS=30}"
-```
-
-### Screenshots
-
-#### IAM Role
-<!-- screenshot: IAM role for s3-cleanup-dev with inline policy -->
-`screenshots/s3-cleanup/iam-role.png`
-
-#### Lambda Configuration
-<!-- screenshot: Lambda function config showing env vars, runtime, timeout -->
-`screenshots/s3-cleanup/lambda-config.png`
-
-#### Test Invocation Output
-<!-- screenshot: Lambda test result showing deleted_keys in response -->
-`screenshots/s3-cleanup/test-invocation.png`
-
-#### CloudWatch Logs
-<!-- screenshot: CloudWatch log stream showing "Marked for deletion" and summary -->
-`screenshots/s3-cleanup/cloudwatch-logs.png`
-
-#### Final Result (Empty Bucket)
-<!-- screenshot: S3 console showing empty bucket after cleanup -->
-`screenshots/s3-cleanup/s3-empty-bucket.png`
-
----
-
-### Discussion: S3 Lifecycle Rules vs Lambda
+#### 1. S3 Lifecycle Rules vs Lambda
 
 S3 Lifecycle Rules handle age-based object expiration natively with zero code and are the right default for simple time-based cleanup. Lambda is the better choice when deletion requires **conditional logic** (e.g. only delete objects matching a naming pattern or a specific metadata tag), **cross-service coordination** (e.g. verify an object is processed in DynamoDB before removing it), or **custom post-deletion actions** such as sending a detailed Slack/SNS alert with the list of deleted keys.
