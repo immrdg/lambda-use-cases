@@ -12,19 +12,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      PYTHON_VERSION: "3.12"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Detect changed lambda directories
         id: changed-lambdas
@@ -47,20 +40,10 @@ jobs:
           for lambda_name in ${{ steps.changed-lambdas.outputs.changed-lambdas }}; do
             echo "Building $lambda_name"
             LAMBDA_DIR="lambdas/$lambda_name"
-            BUILD_DIR="build/$lambda_name"
 
-            mkdir -p "$BUILD_DIR"
-            cp -r "$LAMBDA_DIR"/. "$BUILD_DIR/"
-
-            if [ -f "$BUILD_DIR/requirements.txt" ]; then
-              pip install -r "$BUILD_DIR/requirements.txt" -t "$BUILD_DIR/" --quiet
-            fi
-
-            find "$BUILD_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-
-            # Zip into the lambda's own directory
+            # Zip only handler .py files, exclude test_* files
             ZIP_FILE="$GITHUB_WORKSPACE/$LAMBDA_DIR/lambda-function.zip"
-            (cd "$BUILD_DIR" && zip -r "$ZIP_FILE" . -x "*.pyc")
+            (cd "$LAMBDA_DIR" && zip "$ZIP_FILE" $(find . -maxdepth 1 -name "*.py" ! -name "test_*.py" -type f | sed 's|^./||'))
             echo "Created $LAMBDA_DIR/lambda-function.zip"
           done
 
