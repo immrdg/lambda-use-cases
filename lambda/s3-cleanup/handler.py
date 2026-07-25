@@ -15,7 +15,7 @@ def lambda_handler(event, context):
     Objects older than RETENTION_DAYS (default: 30) will be deleted.
     """
     bucket_name = os.environ.get("BUCKET_NAME")
-    retention_days_str = os.environ.get("RETENTION_DAYS", "30")
+    retention_days_str = os.environ.get("RETENTION_DAYS", "1")
 
     if not bucket_name:
         error_msg = "Environment variable BUCKET_NAME is not set."
