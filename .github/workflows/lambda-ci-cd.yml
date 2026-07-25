@@ -18,7 +18,8 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -50,6 +51,7 @@ jobs:
           commit_message: "build(ci): update compiled lambda-function.zip artifact [skip ci]"
           file_pattern: "lambda/**/lambda-function.zip"
           add_options: "-f"
+          push_options: "--force"
 
   terragrunt-validate:
     name: Validate Terraform & Terragrunt HCL
