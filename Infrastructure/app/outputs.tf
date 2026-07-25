@@ -1,24 +1,31 @@
+# ── Assignment 1 ──────────────────────────────────────────────────────────────
 output "bucket_id" {
-  description = "The ID of the created S3 bucket"
+  description = "S3 cleanup bucket ID"
   value       = module.project.bucket_id
 }
 
-output "bucket_arn" {
-  description = "The ARN of the created S3 bucket"
-  value       = module.project.bucket_arn
+output "s3_cleanup_function_name" {
+  description = "S3 cleanup Lambda function name"
+  value       = module.project.s3_cleanup_function_name
 }
 
-output "lambda_function_name" {
-  description = "The name of the deployed Lambda function"
-  value       = module.project.lambda_function_name
+output "s3_cleanup_function_arn" {
+  description = "S3 cleanup Lambda function ARN"
+  value       = module.project.s3_cleanup_function_arn
 }
 
-output "lambda_function_arn" {
-  description = "The ARN of the deployed Lambda function"
-  value       = module.project.lambda_function_arn
+# ── Assignment 2 ──────────────────────────────────────────────────────────────
+output "ebs_volume_id" {
+  description = "EBS volume ID managed by Terraform"
+  value       = module.project.ebs_volume_id
 }
 
-output "eventbridge_rule_arn" {
-  description = "The ARN of the scheduled EventBridge rule"
-  value       = module.project.eventbridge_rule_arn
+output "ebs_snapshot_function_name" {
+  description = "EBS snapshot Lambda function name"
+  value       = module.project.ebs_snapshot_function_name
+}
+
+output "ebs_snapshot_function_arn" {
+  description = "EBS snapshot Lambda function ARN"
+  value       = module.project.ebs_snapshot_function_arn
 }

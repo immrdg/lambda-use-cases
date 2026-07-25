@@ -17,12 +17,15 @@ provider "aws" {
 module "project" {
   source = "../modules/project"
 
-  environment         = var.environment
-  bucket_name         = var.bucket_name
-  retention_days      = var.retention_days
-  schedule_expression = var.schedule_expression
-  lambda_timeout      = var.lambda_timeout
-  lambda_memory_size  = var.lambda_memory_size
-  force_destroy       = var.force_destroy
-  common_tags         = var.common_tags
+  environment            = var.environment
+  aws_region             = var.aws_region
+  bucket_name            = var.bucket_name
+  s3_retention_days      = var.s3_retention_days
+  s3_schedule_expression = var.s3_schedule_expression
+  lambda_timeout         = var.lambda_timeout
+  lambda_memory_size     = var.lambda_memory_size
+  force_destroy          = var.force_destroy
+  ebs_retention_days     = var.ebs_retention_days
+  ebs_schedule_expression = var.ebs_schedule_expression
+  common_tags            = var.common_tags
 }

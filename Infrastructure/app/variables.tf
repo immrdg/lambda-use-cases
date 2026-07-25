@@ -15,19 +15,20 @@ variable "environment" {
   type        = string
 }
 
+# ── S3 Cleanup ────────────────────────────────────────────────────────────────
 variable "bucket_name" {
   description = "Name of the S3 cleanup bucket"
   type        = string
 }
 
-variable "retention_days" {
-  description = "Retention period for S3 objects in days"
+variable "s3_retention_days" {
+  description = "Retention period for S3 object cleanup in days"
   type        = number
   default     = 30
 }
 
-variable "schedule_expression" {
-  description = "Schedule expression for EventBridge trigger"
+variable "s3_schedule_expression" {
+  description = "EventBridge schedule for S3 cleanup Lambda"
   type        = string
   default     = "rate(1 day)"
 }
@@ -48,6 +49,19 @@ variable "force_destroy" {
   description = "Force destroy S3 bucket"
   type        = bool
   default     = true
+}
+
+# ── EBS Snapshot ──────────────────────────────────────────────────────────────
+variable "ebs_retention_days" {
+  description = "Retention period for EBS snapshots in days"
+  type        = number
+  default     = 30
+}
+
+variable "ebs_schedule_expression" {
+  description = "EventBridge schedule for EBS snapshot Lambda"
+  type        = string
+  default     = "rate(7 days)"
 }
 
 variable "common_tags" {

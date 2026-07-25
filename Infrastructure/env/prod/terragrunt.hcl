@@ -8,15 +8,21 @@ terraform {
 }
 
 inputs = {
-  environment         = "prod"
-  aws_region          = "us-east-1"
-  profile             = "immrdg21"
-  bucket_name         = "s3-cleanup-bucket-prod-use-case-1"
-  retention_days      = 30
-  schedule_expression = "cron(0 2 * * ? *)"
-  lambda_timeout      = 120
-  lambda_memory_size  = 256
-  force_destroy       = false
+  environment        = "prod"
+  aws_region         = "us-east-1"
+  profile            = "immrdg21"
+  lambda_timeout     = 120
+  lambda_memory_size = 256
+  force_destroy      = false
+
+  # Assignment 1 — S3 Cleanup
+  bucket_name            = "s3-cleanup-bucket-prod-use-case-1"
+  s3_retention_days      = 30
+  s3_schedule_expression = "cron(0 2 * * ? *)"
+
+  # Assignment 2 — EBS Snapshot
+  ebs_retention_days      = 30
+  ebs_schedule_expression = "cron(0 2 ? * SUN *)"
 
   common_tags = {
     Environment = "prod"

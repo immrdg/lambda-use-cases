@@ -1,24 +1,25 @@
+# ── Assignment 1 ──────────────────────────────────────────────────────────────
 output "bucket_id" {
-  description = "The ID of the created S3 bucket"
-  value       = module.s3.bucket_id
+  value = module.s3.bucket_id
 }
 
-output "bucket_arn" {
-  description = "The ARN of the created S3 bucket"
-  value       = module.s3.bucket_arn
+output "s3_cleanup_function_name" {
+  value = module.s3_cleanup_lambda.function_name
 }
 
-output "lambda_function_name" {
-  description = "The name of the deployed Lambda function"
-  value       = module.lambda.function_name
+output "s3_cleanup_function_arn" {
+  value = module.s3_cleanup_lambda.function_arn
 }
 
-output "lambda_function_arn" {
-  description = "The ARN of the deployed Lambda function"
-  value       = module.lambda.function_arn
+# ── Assignment 2 ──────────────────────────────────────────────────────────────
+output "ebs_volume_id" {
+  value = module.ebs_volume.volume_id
 }
 
-output "eventbridge_rule_arn" {
-  description = "The ARN of the scheduled EventBridge rule"
-  value       = module.eventbridge.rule_arn
+output "ebs_snapshot_function_name" {
+  value = module.ebs_snapshot_lambda.function_name
+}
+
+output "ebs_snapshot_function_arn" {
+  value = module.ebs_snapshot_lambda.function_arn
 }
