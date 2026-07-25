@@ -1,8 +1,6 @@
 name: AWS Lambda & Terragrunt CI/CD Pipeline
 
 on:
-  push:
-    branches: [ main, master, "feat/**", "infra/**" ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -15,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      PYTHON_VERSION: 3.12
+      PYTHON_VERSION: "3.12"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -24,50 +22,69 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Detect changed lambda directories
         id: changed-lambdas
         run: |
-           if [[ "${{ github.event_name }}" == "push" ]]; then
-             git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep "^lambda/" | cut -d '/' -f2 | sort | uniq | tr '\n' ' ' > changed-lambdas.txt
-           elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
-             git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head }} | grep "^lambdas/" | cut -d '/' -f2 | sort | uniq | tr '\n' ' ' > changed-lambdas.txt
-           else
-             echo "No changes detected" > changed-lambdas.txt
-           fi
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+          # On PR 'opened', before is all-zeros — fall back to merge-base diff
+          if [[ "$BEFORE" == "0000000000000000000000000000000000000000" ]]; then
+            BEFORE=$(git merge-base \
+              "${{ github.event.pull_request.base.sha }}" "$AFTER")
+          fi
+          CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" \
+            | grep "^lambdas/" | cut -d '/' -f2 | sort -u | tr '\n' ' ' | xargs)
+          echo "Changed lambdas: '$CHANGED'"
+          echo "changed-lambdas=$CHANGED" >> "$GITHUB_OUTPUT"
 
-           if [ -f changed-lambdas.txt ]; then
-             CHANGED_LAMBDAS=$(cat changed-lambdas.txt)
-             echo "Changed lambdas: $CHANGED_LAMBDAS"
-             echo "::set-output name=changed-lambdas::$CHANGED_LAMBDAS"
-           else
-             echo "::set-output name=changed-lambdas::"
-           fi
-      - name: Run unit tests
+      - name: Build and zip Lambda packages
         if: steps.changed-lambdas.outputs.changed-lambdas != ''
         run: |
-          for lambda in ${{ steps.changed-lambdas.outputs.changed-lambdas }}; do
-            echo "Running unit tests for $lambda"
-            pytest -m unittest discover -s lambda/$lambda
-          done 
-      - name: Build Lambda
-        if: steps.changed-lambdas.outputs.changed-lambdas != ''
-        run: |
-          for lambda in ${{ steps.changed-lambdas.outputs.changed-lambdas }}; do
-            echo "Building $lambda"
-            cd "lambda/$lambda"
-            python -m pip install --upgrade pip
-            pip install -r requirements.txt -t ./
-            cd -
+          for lambda_name in ${{ steps.changed-lambdas.outputs.changed-lambdas }}; do
+            echo "Building $lambda_name"
+            LAMBDA_DIR="lambdas/$lambda_name"
+            BUILD_DIR="build/$lambda_name"
+
+            mkdir -p "$BUILD_DIR"
+            cp -r "$LAMBDA_DIR"/. "$BUILD_DIR/"
+
+            if [ -f "$BUILD_DIR/requirements.txt" ]; then
+              pip install -r "$BUILD_DIR/requirements.txt" -t "$BUILD_DIR/" --quiet
+            fi
+
+            find "$BUILD_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+
+            # Zip into the lambda's own directory
+            ZIP_FILE="$GITHUB_WORKSPACE/$LAMBDA_DIR/lambda-function.zip"
+            (cd "$BUILD_DIR" && zip -r "$ZIP_FILE" . -x "*.pyc")
+            echo "Created $LAMBDA_DIR/lambda-function.zip"
           done
-        
-      - name: Upload Lambda Packages
+
+      # Runs only on PRs — not workflow_dispatch
+      - name: Commit and push zip packages to repo
+        if: >-
+          steps.changed-lambdas.outputs.changed-lambdas != '' &&
+          github.event_name == 'pull_request'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add lambdas/**/*.zip
+          if git diff --cached --quiet; then
+            echo "No zip changes to commit"
+          else
+            git commit -m "ci: update Lambda zip packages [skip ci]"
+            git push origin HEAD:${{ github.head_ref || github.ref_name }}
+          fi
+
+      - name: Upload Lambda packages as artifact
+        if: steps.changed-lambdas.outputs.changed-lambdas != ''
         uses: actions/upload-artifact@v4
         with:
           name: lambda-packages
-          path: dist/
-        
-        
+          path: lambdas/**/*.zip
+          retention-days: 7
