@@ -4,7 +4,7 @@ variable "function_name" {
 }
 
 variable "source_dir" {
-  description = "Source code directory to package into zip"
+  description = "Lambda directory containing the pre-built lambda-function.zip (built by CI)"
   type        = string
 }
 
