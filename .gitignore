@@ -18,7 +18,7 @@ provider.tf
 build/
 dist/
 *.zip
-!lambda/**/lambda-function.zip
+!lambdas/**/lambda-function.zip
 
 # Python
 __pycache__/
