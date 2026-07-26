@@ -11,8 +11,8 @@ resource "aws_sns_topic" "this" {
 }
 
 resource "aws_sns_topic_subscription" "email" {
-  count     = var.subscription_email != "" ? 1 : 0
+  for_each  = var.subscription_emails
   topic_arn = aws_sns_topic.this.arn
   protocol  = "email"
-  endpoint  = var.subscription_email
+  endpoint  = each.value
 }

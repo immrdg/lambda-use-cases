@@ -12,14 +12,15 @@ module "s3" {
 }
 
 module "s3_cleanup_lambda" {
-  source        = "../lambda"
-  function_name = "s3-cleanup-${var.environment}"
-  source_dir    = "${path.module}/../../../lambdas/s3-cleanup"
-  handler       = "handler.lambda_handler"
-  runtime       = "python3.12"
-  timeout       = var.lambda_timeout
-  memory_size   = var.lambda_memory_size
-  environment   = var.environment
+  source               = "../lambda"
+  function_name        = "s3-cleanup-${var.environment}"
+  source_dir           = "${path.module}/../../../lambdas/s3-cleanup"
+  handler              = "handler.lambda_handler"
+  runtime              = "python3.12"
+  timeout              = var.lambda_timeout
+  memory_size          = var.lambda_memory_size
+  environment          = var.environment
+  enable_custom_policy = true
 
   environment_variables = {
     BUCKET_NAME    = var.bucket_name
@@ -70,14 +71,15 @@ module "ebs_volume" {
 }
 
 module "ebs_snapshot_lambda" {
-  source        = "../lambda"
-  function_name = "ebs-snapshot-${var.environment}"
-  source_dir    = "${path.module}/../../../lambdas/ebs-snapshot"
-  handler       = "handler.lambda_handler"
-  runtime       = "python3.12"
-  timeout       = 60
-  memory_size   = 128
-  environment   = var.environment
+  source               = "../lambda"
+  function_name        = "ebs-snapshot-${var.environment}"
+  source_dir           = "${path.module}/../../../lambdas/ebs-snapshot"
+  handler              = "handler.lambda_handler"
+  runtime              = "python3.12"
+  timeout              = 60
+  memory_size          = 128
+  environment          = var.environment
+  enable_custom_policy = true
 
   environment_variables = {
     VOLUME_ID      = module.ebs_volume.volume_id
@@ -123,14 +125,15 @@ module "ebs_snapshot_schedule" {
 
 # ── Assignment 3: Auto-Tagging EC2 Instances ──────────────────────────────────
 module "auto_tagging_ec2_lambda" {
-  source        = "../lambda"
-  function_name = "auto-tagging-ec2-${var.environment}"
-  source_dir    = "${path.module}/../../../lambdas/auto-tagging-ec2"
-  handler       = "handler.lambda_handler"
-  runtime       = "python3.12"
-  timeout       = 60
-  memory_size   = 128
-  environment   = var.environment
+  source               = "../lambda"
+  function_name        = "auto-tagging-ec2-${var.environment}"
+  source_dir           = "${path.module}/../../../lambdas/auto-tagging-ec2"
+  handler              = "handler.lambda_handler"
+  runtime              = "python3.12"
+  timeout              = 60
+  memory_size          = 128
+  environment          = var.environment
+  enable_custom_policy = true
 
   environment_variables = {
     ENVIRONMENT   = var.environment
@@ -180,22 +183,23 @@ module "auto_tagging_ec2_rule" {
 
 # ── Assignment 6: Audit S3 Buckets for Public Access ──────────────────────────
 module "s3_audit_sns" {
-  source             = "../sns"
-  topic_name         = "s3-public-audit-${var.environment}-alerts"
-  subscription_email = var.sns_subscription_email
-  environment        = var.environment
-  tags               = var.common_tags
+  source              = "../sns"
+  topic_name          = "s3-public-audit-${var.environment}-alerts"
+  subscription_emails = var.sns_subscription_emails
+  environment         = var.environment
+  tags                = var.common_tags
 }
 
 module "s3_public_audit_lambda" {
-  source        = "../lambda"
-  function_name = "s3-public-audit-${var.environment}"
-  source_dir    = "${path.module}/../../../lambdas/s3-public-audit"
-  handler       = "handler.lambda_handler"
-  runtime       = "python3.12"
-  timeout       = 60
-  memory_size   = 128
-  environment   = var.environment
+  source               = "../lambda"
+  function_name        = "s3-public-audit-${var.environment}"
+  source_dir           = "${path.module}/../../../lambdas/s3-public-audit"
+  handler              = "handler.lambda_handler"
+  runtime              = "python3.12"
+  timeout              = 60
+  memory_size          = 128
+  environment          = var.environment
+  enable_custom_policy = true
 
   environment_variables = {
     ENVIRONMENT   = var.environment
@@ -228,13 +232,25 @@ module "s3_public_audit_lambda" {
   tags = var.common_tags
 }
 
-module "s3_public_audit_schedule" {
-  source              = "../eventbridge"
-  rule_name           = "s3-public-audit-${var.environment}-schedule"
-  description         = "Triggers S3 public access audit Lambda daily"
-  schedule_expression = var.s3_audit_schedule_expression
-  target_lambda_arn   = module.s3_public_audit_lambda.function_arn
-  target_lambda_name  = module.s3_public_audit_lambda.function_name
-  environment         = var.environment
-  tags                = var.common_tags
+module "s3_public_audit_rule" {
+  source        = "../eventbridge"
+  rule_name     = "s3-public-audit-${var.environment}-rule"
+  description   = "Triggers S3 public access audit Lambda whenever S3 security settings are modified"
+  event_pattern = jsonencode({
+    source      = ["aws.s3"]
+    detail-type = ["AWS API Call via CloudTrail"]
+    detail      = {
+      eventName = [
+        "PutBucketPublicAccessBlock",
+        "DeleteBucketPublicAccessBlock",
+        "PutBucketPolicy",
+        "DeleteBucketPolicy",
+        "PutBucketAcl"
+      ]
+    }
+  })
+  target_lambda_arn  = module.s3_public_audit_lambda.function_arn
+  target_lambda_name = module.s3_public_audit_lambda.function_name
+  environment        = var.environment
+  tags               = var.common_tags
 }

@@ -44,6 +44,12 @@ variable "environment_variables" {
   default     = {}
 }
 
+variable "enable_custom_policy" {
+  description = "Whether to create a custom IAM policy for Lambda"
+  type        = bool
+  default     = false
+}
+
 variable "custom_policy_json" {
   description = "Optional JSON string for least-privilege inline IAM policy"
   type        = string

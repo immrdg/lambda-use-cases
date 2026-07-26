@@ -12,147 +12,92 @@ PUBLIC_GROUPS = {
     "http://acs.amazonaws.com/groups/global/AuthenticatedUsers",
 }
 
-
-def check_bucket_public_access(s3_client, bucket_name):
-    """
-    Inspects an S3 bucket across three security controls:
-    1. Block Public Access (BPA) configuration
-    2. Bucket Policy status (IsPublic flag)
-    3. Bucket ACL grants (AllUsers / AuthenticatedUsers)
-
-    Returns a dict with `is_public` (bool) and `reasons` (list of str).
-    """
-    reasons = []
-    is_public = False
-
-    # 1. Check Block Public Access Configuration
-    try:
-        bpa_response = s3_client.get_public_access_block(Bucket=bucket_name)
-        bpa_config = bpa_response.get("PublicAccessBlockConfiguration", {})
-
-        disabled_flags = [
-            flag for flag in ["BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"]
-            if not bpa_config.get(flag, False)
-        ]
-
-        if disabled_flags:
-            is_public = True
-            reasons.append(f"Block Public Access is incomplete (disabled flags: {', '.join(disabled_flags)})")
-
-    except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code")
-        if error_code in ["NoSuchPublicAccessBlockConfiguration", "NoSuchBucket"]:
-            is_public = True
-            reasons.append("Block Public Access configuration is NOT enabled")
-        else:
-            logger.warning(f"Could not retrieve Public Access Block for '{bucket_name}': {e}")
-
-    # 2. Check Bucket Policy Status
-    try:
-        policy_status = s3_client.get_bucket_policy_status(Bucket=bucket_name)
-        if policy_status.get("PolicyStatus", {}).get("IsPublic", False):
-            is_public = True
-            reasons.append("Bucket Policy grants PUBLIC access (IsPublic=True)")
-
-    except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code")
-        if error_code not in ["NoSuchBucketPolicy", "NoSuchBucket", "AccessDenied"]:
-            logger.warning(f"Could not retrieve Bucket Policy Status for '{bucket_name}': {e}")
-
-    # 3. Check Bucket ACL Grants
-    try:
-        acl_response = s3_client.get_bucket_acl(Bucket=bucket_name)
-        for grant in acl_response.get("Grants", []):
-            grantee = grant.get("Grantee", {})
-            uri = grantee.get("URI")
-            if uri in PUBLIC_GROUPS:
-                permission = grant.get("Permission")
-                is_public = True
-                reasons.append(f"ACL grants '{permission}' access to public group ({uri.split('/')[-1]})")
-
-    except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code")
-        if error_code not in ["NoSuchBucket", "AccessDenied"]:
-            logger.warning(f"Could not retrieve ACL for '{bucket_name}': {e}")
-
-    return {
-        "bucket_name": bucket_name,
-        "is_public": is_public,
-        "reasons": reasons,
-    }
-
-
 def lambda_handler(event, context):
-    """
-    Audits all S3 buckets in the AWS account for public access exposure.
-    If any buckets are public or lack Block Public Access enforcement, sends an SNS alert.
-    """
-    logger.info("Starting S3 bucket public access security audit...")
+    logger.info(f"Received event payload: {json.dumps(event)}")
 
     sns_topic_arn = os.environ.get("SNS_TOPIC_ARN")
     s3_client = boto3.client("s3")
 
-    try:
-        response = s3_client.list_buckets()
-        buckets = response.get("Buckets", [])
-    except ClientError as e:
-        error_msg = f"Failed to list S3 buckets: {e}"
-        logger.error(error_msg)
-        return {"statusCode": 500, "body": error_msg}
+    detail = event.get("detail", {})
+    event_name = detail.get("eventName", "AuditTrigger")
+    bucket_name = detail.get("requestParameters", {}).get("bucketName") or event.get("bucket_name")
 
-    audited_count = len(buckets)
-    public_buckets = []
+    if not bucket_name:
+        logger.warning("No bucketName found in event payload.")
+        return {"statusCode": 400, "body": "No bucketName in event"}
 
-    logger.info(f"Discovered {audited_count} S3 bucket(s) to audit.")
+    reasons = []
+    is_public = False
 
-    for bucket in buckets:
-        bucket_name = bucket["Name"]
-        result = check_bucket_public_access(s3_client, bucket_name)
-        if result["is_public"]:
-            public_buckets.append(result)
-            logger.warning(f"SECURITY ALERT: Bucket '{bucket_name}' is PUBLIC or unblocked. Reasons: {result['reasons']}")
-        else:
-            logger.info(f"Bucket '{bucket_name}' is secure (Block Public Access enforced, non-public).")
+    # Check conditionally based on eventName
+    if event_name in ["PutBucketPublicAccessBlock", "DeleteBucketPublicAccessBlock"]:
+        try:
+            bpa = s3_client.get_public_access_block(Bucket=bucket_name).get("PublicAccessBlockConfiguration", {})
+            disabled = [f for f in ["BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"] if not bpa.get(f, False)]
+            if disabled:
+                is_public = True
+                reasons.append(f"Block Public Access disabled flags: {', '.join(disabled)}")
+        except ClientError:
+            is_public = True
+            reasons.append("Block Public Access is NOT enabled")
 
-    public_count = len(public_buckets)
-    summary_msg = f"Audit complete. Audited {audited_count} bucket(s). Found {public_count} public/unrestricted bucket(s)."
-    logger.info(summary_msg)
+    elif event_name in ["PutBucketPolicy", "DeleteBucketPolicy"]:
+        try:
+            if s3_client.get_bucket_policy_status(Bucket=bucket_name).get("PolicyStatus", {}).get("IsPublic", False):
+                is_public = True
+                reasons.append("Bucket Policy grants PUBLIC access (IsPublic=True)")
+        except ClientError:
+            pass
 
-    # Send SNS notification if public buckets are detected
-    if public_count > 0 and sns_topic_arn:
-        alert_lines = [
-            "🚨 AWS S3 PUBLIC ACCESS AUDIT ALERT 🚨\n",
-            f"Automated security audit detected {public_count} publicly accessible or unblocked S3 bucket(s):\n",
+    elif event_name == "PutBucketAcl":
+        try:
+            for grant in s3_client.get_bucket_acl(Bucket=bucket_name).get("Grants", []):
+                if grant.get("Grantee", {}).get("URI") in PUBLIC_GROUPS:
+                    is_public = True
+                    reasons.append(f"ACL grants public access ({grant.get('Permission')})")
+        except ClientError:
+            pass
+
+    else:
+        # Fallback for manual or full audits: check BPA & Policy
+        try:
+            bpa = s3_client.get_public_access_block(Bucket=bucket_name).get("PublicAccessBlockConfiguration", {})
+            disabled = [f for f in ["BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"] if not bpa.get(f, False)]
+            if disabled:
+                is_public = True
+                reasons.append(f"Block Public Access disabled flags: {', '.join(disabled)}")
+        except ClientError:
+            is_public = True
+            reasons.append("Block Public Access is NOT enabled")
+
+    if is_public and sns_topic_arn:
+        lines = [
+            "🚨 AWS S3 PUBLIC ACCESS ALERT 🚨",
+            f"Event: {event_name}",
+            f"Target Bucket: {bucket_name}\n",
+            "Security Findings:",
         ]
+        for r in reasons:
+            lines.append(f"  - {r}")
 
-        for item in public_buckets:
-            alert_lines.append(f"• Bucket: {item['bucket_name']}")
-            for reason in item["reasons"]:
-                alert_lines.append(f"  - {reason}")
-            alert_lines.append("")
-
-        alert_lines.append(f"\nTotal Audited: {audited_count} | Public Buckets: {public_count}")
-        alert_lines.append("Action Required: Enable Block Public Access and review bucket policies/ACLs immediately.")
-
-        alert_message = "\n".join(alert_lines)
+        lines.append("\nAction Required: Re-enable Block Public Access and restrict bucket permissions.")
 
         try:
-            sns_client = boto3.client("sns")
-            sns_response = sns_client.publish(
+            boto3.client("sns").publish(
                 TopicArn=sns_topic_arn,
-                Subject=f"SECURITY ALERT: {public_count} Public S3 Bucket(s) Detected",
-                Message=alert_message,
+                Subject=f"SECURITY ALERT: Public S3 Bucket ({bucket_name})",
+                Message="\n".join(lines),
             )
-            logger.info(f"Published SNS alert message (MessageId: {sns_response.get('MessageId')}) to {sns_topic_arn}")
+            logger.info("SNS security alert published successfully.")
         except ClientError as e:
-            logger.error(f"Failed to publish SNS alert to {sns_topic_arn}: {e}")
+            logger.error(f"Error publishing SNS alert: {e}")
 
     return {
         "statusCode": 200,
         "body": {
-            "message": summary_msg,
-            "total_audited": audited_count,
-            "public_count": public_count,
-            "public_buckets": public_buckets,
+            "bucket_name": bucket_name,
+            "event_name": event_name,
+            "is_public": is_public,
+            "reasons": reasons,
         },
     }
