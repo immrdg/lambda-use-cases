@@ -24,6 +24,9 @@ inputs = {
   ebs_retention_days      = 30
   ebs_schedule_expression = "rate(7 days)"
 
+  # Assignment 6 — S3 Public Access Audit & SNS Alert (Event-Driven)
+  sns_subscription_emails = ["d.gireesh21@gmail.com"]
+
   common_tags = {
     Environment = "dev"
     Project     = "lambda-automation"

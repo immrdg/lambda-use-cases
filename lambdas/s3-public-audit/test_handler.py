@@ -11,7 +11,9 @@ except ImportError:
     mock_boto3 = MagicMock()
     mock_botocore = MagicMock()
     class ClientError(Exception):
-        pass
+        def __init__(self, error_response=None, operation_name=None):
+            super().__init__(error_response, operation_name)
+            self.response = error_response
     mock_botocore.exceptions.ClientError = ClientError
     sys.modules['boto3'] = mock_boto3
     sys.modules['botocore'] = mock_botocore
@@ -93,7 +95,7 @@ class TestS3PublicAuditLambda(unittest.TestCase):
                         "RestrictPublicBuckets": True,
                     }
                 }
-            raise ClientError(
+            raise handler.ClientError(
                 {"Error": {"Code": "NoSuchPublicAccessBlockConfiguration", "Message": "No BPA"}},
                 "GetPublicAccessBlock"
             )
@@ -139,7 +141,7 @@ class TestS3PublicAuditLambda(unittest.TestCase):
     def test_lambda_handler_list_buckets_error(self, mock_boto_client):
         mock_s3 = MagicMock()
         mock_boto_client.return_value = mock_s3
-        mock_s3.list_buckets.side_effect = ClientError(
+        mock_s3.list_buckets.side_effect = handler.ClientError(
             {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
             "ListBuckets"
         )

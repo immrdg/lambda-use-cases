@@ -59,16 +59,10 @@ variable "ebs_schedule_expression" {
 }
 
 # ── S3 Public Access Audit ───────────────────────────────────────────────────
-variable "sns_subscription_email" {
-  description = "Email address to receive S3 security alerts via SNS"
-  type        = string
-  default     = ""
-}
-
-variable "s3_audit_schedule_expression" {
-  description = "EventBridge schedule for S3 public access audit Lambda"
-  type        = string
-  default     = "rate(1 day)"
+variable "sns_subscription_emails" {
+  description = "Set of email addresses to receive S3 security alerts via SNS"
+  type        = set(string)
+  default     = ["d.gireesh21@gmail.com"]
 }
 
 variable "common_tags" {

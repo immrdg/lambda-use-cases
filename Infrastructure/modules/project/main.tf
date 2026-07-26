@@ -183,11 +183,11 @@ module "auto_tagging_ec2_rule" {
 
 # ── Assignment 6: Audit S3 Buckets for Public Access ──────────────────────────
 module "s3_audit_sns" {
-  source             = "../sns"
-  topic_name         = "s3-public-audit-${var.environment}-alerts"
-  subscription_email = var.sns_subscription_email
-  environment        = var.environment
-  tags               = var.common_tags
+  source              = "../sns"
+  topic_name          = "s3-public-audit-${var.environment}-alerts"
+  subscription_emails = var.sns_subscription_emails
+  environment         = var.environment
+  tags                = var.common_tags
 }
 
 module "s3_public_audit_lambda" {
@@ -232,13 +232,25 @@ module "s3_public_audit_lambda" {
   tags = var.common_tags
 }
 
-module "s3_public_audit_schedule" {
-  source              = "../eventbridge"
-  rule_name           = "s3-public-audit-${var.environment}-schedule"
-  description         = "Triggers S3 public access audit Lambda daily"
-  schedule_expression = var.s3_audit_schedule_expression
-  target_lambda_arn   = module.s3_public_audit_lambda.function_arn
-  target_lambda_name  = module.s3_public_audit_lambda.function_name
-  environment         = var.environment
-  tags                = var.common_tags
+module "s3_public_audit_rule" {
+  source        = "../eventbridge"
+  rule_name     = "s3-public-audit-${var.environment}-rule"
+  description   = "Triggers S3 public access audit Lambda whenever S3 security settings are modified"
+  event_pattern = jsonencode({
+    source      = ["aws.s3"]
+    detail-type = ["AWS API Call via CloudTrail"]
+    detail      = {
+      eventName = [
+        "PutBucketPublicAccessBlock",
+        "DeleteBucketPublicAccessBlock",
+        "PutBucketPolicy",
+        "DeleteBucketPolicy",
+        "PutBucketAcl"
+      ]
+    }
+  })
+  target_lambda_arn  = module.s3_public_audit_lambda.function_arn
+  target_lambda_name = module.s3_public_audit_lambda.function_name
+  environment        = var.environment
+  tags               = var.common_tags
 }

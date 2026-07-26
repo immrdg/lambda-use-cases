@@ -3,10 +3,10 @@ variable "topic_name" {
   type        = string
 }
 
-variable "subscription_email" {
-  description = "Optional email address to subscribe to the SNS Topic"
-  type        = string
-  default     = ""
+variable "subscription_emails" {
+  description = "Set of email addresses to subscribe to the SNS Topic"
+  type        = set(string)
+  default     = []
 }
 
 variable "environment" {
