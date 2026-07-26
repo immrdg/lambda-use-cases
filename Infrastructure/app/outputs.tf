@@ -29,3 +29,19 @@ output "ebs_snapshot_function_arn" {
   description = "EBS snapshot Lambda function ARN"
   value       = module.project.ebs_snapshot_function_arn
 }
+
+# ── Assignment 3 ──────────────────────────────────────────────────────────────
+output "auto_tagging_ec2_function_name" {
+  description = "Auto-Tagging EC2 Lambda function name"
+  value       = module.project.auto_tagging_ec2_function_name
+}
+
+output "auto_tagging_ec2_function_arn" {
+  description = "Auto-Tagging EC2 Lambda function ARN"
+  value       = module.project.auto_tagging_ec2_function_arn
+}
+
+output "auto_tagging_ec2_rule_name" {
+  description = "Auto-Tagging EC2 EventBridge rule name"
+  value       = module.project.auto_tagging_ec2_rule_name
+}

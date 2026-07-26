@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone, timedelta
 import os
 import sys
+import importlib.util
 
 try:
     import boto3
@@ -17,14 +18,16 @@ except ImportError:
     sys.modules['botocore'] = mock_botocore
     sys.modules['botocore.exceptions'] = mock_botocore.exceptions
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-import handler
+handler_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "handler.py")
+spec = importlib.util.spec_from_file_location("s3_cleanup_handler", handler_path)
+handler = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(handler)
 
 
 class TestS3CleanupLambda(unittest.TestCase):
 
     @patch.dict(os.environ, {"BUCKET_NAME": "test-bucket", "RETENTION_DAYS": "30"})
-    @patch("handler.boto3.client")
+    @patch.object(handler.boto3, "client")
     def test_lambda_handler_deletes_old_objects(self, mock_boto_client):
         mock_s3 = MagicMock()
         mock_boto_client.return_value = mock_s3

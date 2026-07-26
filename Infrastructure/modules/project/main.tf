@@ -120,3 +120,60 @@ module "ebs_snapshot_schedule" {
   environment         = var.environment
   tags                = var.common_tags
 }
+
+# ── Assignment 3: Auto-Tagging EC2 Instances ──────────────────────────────────
+module "auto_tagging_ec2_lambda" {
+  source        = "../lambda"
+  function_name = "auto-tagging-ec2-${var.environment}"
+  source_dir    = "${path.module}/../../../lambdas/auto-tagging-ec2"
+  handler       = "handler.lambda_handler"
+  runtime       = "python3.12"
+  timeout       = 60
+  memory_size   = 128
+  environment   = var.environment
+
+  environment_variables = {
+    ENVIRONMENT   = var.environment
+    DEFAULT_OWNER = "DevOpsTeam"
+  }
+
+  custom_policy_json = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EC2AutoTaggingAccess"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateTags",
+          "ec2:DescribeInstances"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid      = "CloudTrailLookupAccess"
+        Effect   = "Allow"
+        Action   = ["cloudtrail:LookupEvents"]
+        Resource = "*"
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+module "auto_tagging_ec2_rule" {
+  source             = "../eventbridge"
+  rule_name          = "auto-tagging-ec2-${var.environment}-rule"
+  description        = "Triggers auto-tagging Lambda when an EC2 instance enters running state"
+  event_pattern      = jsonencode({
+    source      = ["aws.ec2"]
+    detail-type = ["EC2 Instance State-change Notification"]
+    detail      = {
+      state = ["running"]
+    }
+  })
+  target_lambda_arn  = module.auto_tagging_ec2_lambda.function_arn
+  target_lambda_name = module.auto_tagging_ec2_lambda.function_name
+  environment        = var.environment
+  tags               = var.common_tags
+}

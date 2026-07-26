@@ -15,17 +15,24 @@ lambda-use-cases/
 │   ├── modules/
 │   │   ├── lambda/               # Lambda + IAM least-privilege
 │   │   ├── s3/                   # S3 bucket
-│   │   ├── eventbridge/          # EventBridge schedule rule
-│   │   └── project/              # Orchestration (for_each over lambdas map)
+│   │   ├── ebs/                  # EBS volume
+│   │   ├── eventbridge/          # EventBridge schedule & pattern rules
+│   │   └── project/              # Orchestration module
 │   └── env/
 │       ├── dev/terragrunt.hcl
 │       └── prod/terragrunt.hcl
 ├── lambdas/
-│   └── s3-cleanup/
+│   ├── s3-cleanup/
+│   │   ├── handler.py
+│   │   ├── test_handler.py
+│   │   └── requirements.txt
+│   ├── ebs-snapshot/
+│   │   ├── handler.py
+│   │   └── requirements.txt
+│   └── auto-tagging-ec2/
 │       ├── handler.py
 │       ├── test_handler.py
-│       ├── requirements.txt
-│       └── lambda-function.zip   # Built by CI, consumed by Terraform
+│       └── requirements.txt
 ├── Makefile
 └── terragrunt.hcl
 ```
@@ -80,45 +87,78 @@ make test
 - Deletes stale objects in batches of 1,000 via `delete_objects`
 - Logs every deleted key and a final summary to CloudWatch
 
+---
+
+## Assignment 3 — Auto-Tagging EC2 Instances on Launch
+
+**Objective:** Automatically tag newly launched EC2 instances for resource tracking, ownership, and cost allocation.
+
+### How It Works
+
+`lambdas/auto-tagging-ec2/handler.py`:
+- Listens to EventBridge rule matching `EC2 Instance State-change Notification` for `state: running`
+- Extracts `instance-id` from EventBridge detail payload
+- Automatically attaches tags:
+  - `LaunchDate`: `<YYYY-MM-DD>` (current UTC date)
+  - `Owner`: IAM user extracted from CloudTrail `RunInstances` event (Bonus Feature), defaulting to `DEFAULT_OWNER` (`DevOpsTeam`)
+  - `Environment`: Target deployment environment (`dev`, `prod`)
+  - `AutoTaggedBy`: `Lambda-AutoTagging`
+- Prints and logs confirmation output to CloudWatch
+
 ### Environment Variables
 
 | Variable | Description | Default |
 |---|---|---|
-| `BUCKET_NAME` | Target S3 bucket name | required |
-| `RETENTION_DAYS` | Age threshold in days (supports decimals for testing) | `30` |
+| `DEFAULT_OWNER` | Fallback owner tag if CloudTrail lookup returns no match | `DevOpsTeam` |
+| `ENVIRONMENT` | Target deployment environment name | `dev` |
 
 ### IAM Policy (Least Privilege)
 
 ```json
 {
+  "Version": "2012-10-17",
   "Statement": [
-    { "Action": ["s3:ListBucket"],   "Resource": "arn:aws:s3:::BUCKET" },
-    { "Action": ["s3:DeleteObject"], "Resource": "arn:aws:s3:::BUCKET/*" }
+    {
+      "Sid": "EC2AutoTaggingAccess",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateTags",
+        "ec2:DescribeInstances"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CloudTrailLookupAccess",
+      "Effect": "Allow",
+      "Action": [
+        "cloudtrail:LookupEvents"
+      ],
+      "Resource": "*"
+    }
   ]
 }
 ```
 
-### EventBridge Schedule
+### EventBridge Pattern Rule
 
-| Environment | Schedule |
-|---|---|
-| dev | `rate(1 day)` |
-| prod | `cron(0 2 * * ? *)` — 2 AM UTC daily |
+Matches EC2 instance state-change notifications:
 
-### Manual Invocation
-
-```bash
-aws lambda invoke \
-  --function-name s3-cleanup-dev \
-  --profile immrdg21 \
-  --region us-east-1 \
-  --payload '{}' \
-  --cli-binary-format raw-in-base64-out \
-  response.json && cat response.json
+```json
+{
+  "source": ["aws.ec2"],
+  "detail-type": ["EC2 Instance State-change Notification"],
+  "detail": {
+    "state": ["running"]
+  }
+}
 ```
 
-### Discussions: 
+### Testing & Verification
 
-#### 1. S3 Lifecycle Rules vs Lambda
-
-S3 Lifecycle Rules handle age-based object expiration natively with zero code and are the right default for simple time-based cleanup. Lambda is the better choice when deletion requires **conditional logic** (e.g. only delete objects matching a naming pattern or a specific metadata tag), **cross-service coordination** (e.g. verify an object is processed in DynamoDB before removing it), or **custom post-deletion actions** such as sending a detailed Slack/SNS alert with the list of deleted keys.
+1. Launch a new t3.micro EC2 instance in us-east-1.
+2. Observe EventBridge trigger the `auto-tagging-ec2-dev` Lambda function when state transitions to `running`.
+3. Check instance tags in AWS EC2 Console: confirm `LaunchDate`, `Owner`, `Environment`, and `AutoTaggedBy` appear.
+4. Run automated test suite:
+   ```bash
+   make test
+   ```

@@ -16,7 +16,7 @@ help:
 	@echo "  make apply-prod    - Run terragrunt apply for PROD environment"
 
 test:
-	python3 -m pytest lambdas/s3-cleanup/test_handler.py -v
+	python3 -m pytest --import-mode=importlib lambdas/*/test_handler.py -v
 
 init-dev:
 	AWS_PROFILE=$(AWS_PROFILE) terragrunt --working-dir Infrastructure/env/dev init
