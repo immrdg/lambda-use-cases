@@ -34,7 +34,7 @@ resource "aws_iam_role_policy_attachment" "basic_execution" {
 }
 
 resource "aws_iam_role_policy" "custom_policy" {
-  count  = var.custom_policy_json != null && var.custom_policy_json != "" ? 1 : 0
+  count  = var.enable_custom_policy ? 1 : 0
   name   = "${var.function_name}-policy"
   role   = aws_iam_role.lambda_role.id
   policy = var.custom_policy_json
