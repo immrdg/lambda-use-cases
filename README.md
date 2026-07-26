@@ -17,6 +17,7 @@ lambda-use-cases/
 │   │   ├── s3/                   # S3 bucket
 │   │   ├── ebs/                  # EBS volume
 │   │   ├── eventbridge/          # EventBridge schedule & pattern rules
+│   │   ├── sns/                  # SNS Topic & Email Subscription
 │   │   └── project/              # Orchestration module
 │   └── env/
 │       ├── dev/terragrunt.hcl
@@ -28,8 +29,13 @@ lambda-use-cases/
 │   │   └── requirements.txt
 │   ├── ebs-snapshot/
 │   │   ├── handler.py
+│   │   ├── test_handler.py
 │   │   └── requirements.txt
-│   └── auto-tagging-ec2/
+│   ├── auto-tagging-ec2/
+│   │   ├── handler.py
+│   │   ├── test_handler.py
+│   │   └── requirements.txt
+│   └── s3-public-audit/
 │       ├── handler.py
 │       ├── test_handler.py
 │       └── requirements.txt
@@ -102,15 +108,23 @@ make test
   - `LaunchDate`: `<YYYY-MM-DD>` (current UTC date)
   - `Owner`: IAM user extracted from CloudTrail `RunInstances` event (Bonus Feature), defaulting to `DEFAULT_OWNER` (`DevOpsTeam`)
   - `Environment`: Target deployment environment (`dev`, `prod`)
-  - `AutoTaggedBy`: `Lambda-AutoTagging`
 - Prints and logs confirmation output to CloudWatch
 
-### Environment Variables
+---
 
-| Variable | Description | Default |
-|---|---|---|
-| `DEFAULT_OWNER` | Fallback owner tag if CloudTrail lookup returns no match | `DevOpsTeam` |
-| `ENVIRONMENT` | Target deployment environment name | `dev` |
+## Assignment 6 — Audit S3 Buckets for Public Access and Notify
+
+**Objective:** Detect any bucket that is publicly accessible and alert via SNS.
+
+### How It Works
+
+`lambdas/s3-public-audit/handler.py`:
+- Audits all S3 buckets across 3 security layers:
+  1. **Block Public Access Configuration**: `get_public_access_block` (checks `BlockPublicAcls`, `IgnorePublicAcls`, `BlockPublicPolicy`, `RestrictPublicBuckets`)
+  2. **Bucket Policy Status**: `get_bucket_policy_status` (`IsPublic` flag)
+  3. **Bucket ACL Grants**: `get_bucket_acl` (checks grants to `AllUsers` or `AuthenticatedUsers`)
+- If any public or unblocked buckets are detected, formats a detailed security alert and publishes to SNS (`SNS_TOPIC_ARN`)
+- Triggered on a daily schedule via EventBridge (`rate(1 day)`)
 
 ### IAM Policy (Least Privilege)
 
@@ -119,46 +133,29 @@ make test
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "EC2AutoTaggingAccess",
+      "Sid": "S3PublicAuditAccess",
       "Effect": "Allow",
       "Action": [
-        "ec2:CreateTags",
-        "ec2:DescribeInstances"
+        "s3:ListAllMyBuckets",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetBucketPolicyStatus",
+        "s3:GetBucketAcl"
       ],
       "Resource": "*"
     },
     {
-      "Sid": "CloudTrailLookupAccess",
+      "Sid": "SNSPublishAlertAccess",
       "Effect": "Allow",
-      "Action": [
-        "cloudtrail:LookupEvents"
-      ],
-      "Resource": "*"
+      "Action": ["sns:Publish"],
+      "Resource": "arn:aws:sns:*:*:s3-public-audit-*"
     }
   ]
 }
 ```
 
-### EventBridge Pattern Rule
-
-Matches EC2 instance state-change notifications:
-
-```json
-{
-  "source": ["aws.ec2"],
-  "detail-type": ["EC2 Instance State-change Notification"],
-  "detail": {
-    "state": ["running"]
-  }
-}
-```
-
 ### Testing & Verification
 
-1. Launch a new t3.micro EC2 instance in us-east-1.
-2. Observe EventBridge trigger the `auto-tagging-ec2-dev` Lambda function when state transitions to `running`.
-3. Check instance tags in AWS EC2 Console: confirm `LaunchDate`, `Owner`, `Environment`, and `AutoTaggedBy` appear.
-4. Run automated test suite:
-   ```bash
-   make test
-   ```
+1. Deliberately disable Block Public Access or attach a public read policy on a test bucket.
+2. Manually invoke or wait for the daily EventBridge trigger for `s3-public-audit-dev`.
+3. Confirm SNS alert email is delivered detailing the non-compliant bucket and exact exposure reasons.
+4. Re-enable Block Public Access on the test bucket immediately after testing.
