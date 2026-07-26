@@ -45,3 +45,19 @@ output "auto_tagging_ec2_rule_name" {
   description = "Auto-Tagging EC2 EventBridge rule name"
   value       = module.project.auto_tagging_ec2_rule_name
 }
+
+# ── Assignment 6 ──────────────────────────────────────────────────────────────
+output "s3_public_audit_function_name" {
+  description = "S3 Public Access Audit Lambda function name"
+  value       = module.project.s3_public_audit_function_name
+}
+
+output "s3_public_audit_function_arn" {
+  description = "S3 Public Access Audit Lambda function ARN"
+  value       = module.project.s3_public_audit_function_arn
+}
+
+output "s3_audit_sns_topic_arn" {
+  description = "S3 Public Access Audit SNS topic ARN"
+  value       = module.project.s3_audit_sns_topic_arn
+}

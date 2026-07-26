@@ -36,3 +36,16 @@ output "auto_tagging_ec2_function_arn" {
 output "auto_tagging_ec2_rule_name" {
   value = module.auto_tagging_ec2_rule.rule_name
 }
+
+# ── Assignment 6 ──────────────────────────────────────────────────────────────
+output "s3_public_audit_function_name" {
+  value = module.s3_public_audit_lambda.function_name
+}
+
+output "s3_public_audit_function_arn" {
+  value = module.s3_public_audit_lambda.function_arn
+}
+
+output "s3_audit_sns_topic_arn" {
+  value = module.s3_audit_sns.topic_arn
+}

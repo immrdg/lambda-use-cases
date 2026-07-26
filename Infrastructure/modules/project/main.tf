@@ -177,3 +177,64 @@ module "auto_tagging_ec2_rule" {
   environment        = var.environment
   tags               = var.common_tags
 }
+
+# ── Assignment 6: Audit S3 Buckets for Public Access ──────────────────────────
+module "s3_audit_sns" {
+  source             = "../sns"
+  topic_name         = "s3-public-audit-${var.environment}-alerts"
+  subscription_email = var.sns_subscription_email
+  environment        = var.environment
+  tags               = var.common_tags
+}
+
+module "s3_public_audit_lambda" {
+  source        = "../lambda"
+  function_name = "s3-public-audit-${var.environment}"
+  source_dir    = "${path.module}/../../../lambdas/s3-public-audit"
+  handler       = "handler.lambda_handler"
+  runtime       = "python3.12"
+  timeout       = 60
+  memory_size   = 128
+  environment   = var.environment
+
+  environment_variables = {
+    ENVIRONMENT   = var.environment
+    SNS_TOPIC_ARN = module.s3_audit_sns.topic_arn
+  }
+
+  custom_policy_json = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "S3PublicAuditAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:ListAllMyBuckets",
+          "s3:GetBucketPublicAccessBlock",
+          "s3:GetBucketPolicyStatus",
+          "s3:GetBucketAcl"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid      = "SNSPublishAlertAccess"
+        Effect   = "Allow"
+        Action   = ["sns:Publish"]
+        Resource = module.s3_audit_sns.topic_arn
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+module "s3_public_audit_schedule" {
+  source              = "../eventbridge"
+  rule_name           = "s3-public-audit-${var.environment}-schedule"
+  description         = "Triggers S3 public access audit Lambda daily"
+  schedule_expression = var.s3_audit_schedule_expression
+  target_lambda_arn   = module.s3_public_audit_lambda.function_arn
+  target_lambda_name  = module.s3_public_audit_lambda.function_name
+  environment         = var.environment
+  tags                = var.common_tags
+}
